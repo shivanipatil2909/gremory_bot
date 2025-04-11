@@ -188,88 +188,36 @@
 #     loop.run_until_complete(main())
 #     port = int(os.environ.get("PORT", 10000))
 #     app.run(host="0.0.0.0", port=port)
-import os
-import logging
-import asyncio
 from flask import Flask, request
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
-)
+import requests
+import os
+from dotenv import load_dotenv
 
-# Enable logging
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+load_dotenv()  # Load environment variables from .env
 
-# Environment variables
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Example: https://your-domain.com/webhook
-
-# Create Flask app
 app = Flask(__name__)
 
-# Build Application instance (only once)
-application = ApplicationBuilder().token(TOKEN).build()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
+@app.route('/')
+def home():
+    return "Telegram bot is live!"
 
-# Define basic command handlers
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I'm your bot 👋")
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    data = request.get_json()
 
+    if "message" in data:
+        chat_id = data["message"]["chat"]["id"]
+        reply = "hey shivani"
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send /start to start me, or just say hi!")
+        requests.post(TELEGRAM_API_URL, json={
+            "chat_id": chat_id,
+            "text": reply
+        })
 
-
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(update.message.text)
-
-
-# Add handlers to application
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("help", help_command))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-
-
-# Flask root route (for status check)
-@app.route("/", methods=["GET"])
-def index():
-    return "🚀 Bot is alive!", 200
-
-
-# Webhook route
-@app.route("/webhook", methods=["POST"])
-async def webhook():
-    """Process incoming webhook updates"""
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        await application.process_update(update)
-    except Exception as e:
-        logger.error(f"Error processing update: {e}")
-        return "Error", 500
-    return "OK", 200
-
-
-# Startup hook to initialize the application and set the webhook
-async def setup_webhook():
-    logger.info("Deleting old webhook (if any)...")
-    await application.bot.delete_webhook(drop_pending_updates=True)
-    logger.info("Setting new webhook...")
-    await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
-    logger.info(f"Webhook set to {WEBHOOK_URL}/webhook")
-
+    return "ok", 200
 
 if __name__ == "__main__":
-    # Start setup before running Flask
-    asyncio.run(setup_webhook())
-
-    # Run Flask app
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
-
-    # Start Flask server
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
+    app.run()
