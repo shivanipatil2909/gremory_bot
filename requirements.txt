@@ -3,3 +3,4 @@ Flask==2.2.5
 python-dotenv
 requests
 gunicorn
+flask_cors
