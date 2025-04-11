@@ -19,7 +19,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-# Validate environment variables
 if not BOT_TOKEN or not WEBHOOK_URL:
     raise Exception("❌ BOT_TOKEN or WEBHOOK_URL is missing from environment variables.")
 
@@ -164,20 +163,18 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 🧠 Webhook endpoint
 @app.route('/webhook', methods=['POST'])
-def webhook():
+async def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.get_event_loop().run_until_complete(application.process_update(update))
+    await application.process_update(update)
     return jsonify(success=True)
-
-
 
 # 🟢 Health check route
 @app.route('/', methods=['GET'])
 def index():
     return "🚀 Telegram bot is live!"
 
-# 🧩 Initialize and run bot
-async def initialize_bot():
+# 🔰 Main entrypoint
+async def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
@@ -186,9 +183,8 @@ async def initialize_bot():
     await application.start()
     await application.bot.set_webhook(url=WEBHOOK_URL)
 
-# 🔰 Main entrypoint
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(initialize_bot())
+    loop.run_until_complete(main())
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
