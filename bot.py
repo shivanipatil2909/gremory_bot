@@ -1,7 +1,7 @@
 import os
 import requests
 import asyncio
-from flask import Flask, request
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -156,13 +156,13 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error while searching: {e}", reply_markup=create_buttons())
 
-# 🧠 Webhook endpoint
+# 🧠 Webhook endpoint (updated)
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.method == "POST":
         update = Update.de_json(request.get_json(force=True), application.bot)
-        asyncio.create_task(application.process_update(update))  # ✅ Works in Flask
-        return "ok"
+        asyncio.create_task(application.process_update(update))
+        return jsonify(success=True)  # ✅ Return JSON response
 
 # 🟢 Flask index route
 @app.route('/', methods=['GET'])
@@ -183,4 +183,4 @@ async def initialize_bot():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.run_until_complete(initialize_bot())
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
