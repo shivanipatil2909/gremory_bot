@@ -21,7 +21,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-app-name.onrender.c
 # Flask app
 app = Flask(__name__)
 
-# Telegram bot application
+# Create Telegram bot application
 application = Application.builder().token(BOT_TOKEN).build()
 
 # 🔁 Fetch pool data
@@ -161,8 +161,7 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def webhook():
     if request.method == "POST":
         update = Update.de_json(request.get_json(force=True), application.bot)
-        loop = asyncio.get_event_loop()
-        loop.create_task(application.process_update(update))  # ✅ FIXED
+        asyncio.create_task(application.process_update(update))  # ✅ Works in Flask
         return "ok"
 
 # 🟢 Flask index route
@@ -170,8 +169,8 @@ def webhook():
 def index():
     return "🚀 Bot is running via webhook."
 
-# 🔧 Setup handlers and start webhook
-async def setup():
+# Start the bot and set webhook before running Flask
+async def initialize_bot():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
@@ -180,7 +179,8 @@ async def setup():
     await application.start()
     await application.bot.set_webhook(url=WEBHOOK_URL)
 
-# Run the Flask app with bot setup
+# Entry point
 if __name__ == "__main__":
-    asyncio.run(setup())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(initialize_bot())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
