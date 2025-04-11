@@ -161,11 +161,11 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error while searching: {e}", reply_markup=create_buttons())
 
-# 🧠 Webhook endpoint
+# 🧠 Webhook endpoint (FIXED for Flask)
 @app.route('/webhook', methods=['POST'])
-async def webhook():
+def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.process_update(update)
+    asyncio.run(application.process_update(update))
     return jsonify(success=True)
 
 # 🟢 Health check route
