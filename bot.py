@@ -204,7 +204,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Environment variables
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Example: https://your-domain.com/webhook
 
 # Create Flask app
