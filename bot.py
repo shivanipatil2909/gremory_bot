@@ -202,15 +202,15 @@ from telegram.ext import (
     filters,
 )
 
+# 🔐 Load environment variables
 load_dotenv()
-
 TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-bot = Bot(TOKEN)
 
+bot = Bot(TOKEN)
 app = Flask(__name__)
 
-# 🔁 Fetch pool data
+# 🌊 Fetch pool data function
 def fetch_pools(limit=3):
     url = f"https://dlmm-api.meteora.ag/pair/all_with_pagination?limit={limit}"
     try:
@@ -226,108 +226,101 @@ def fetch_pools(limit=3):
             liquidity = pool.get("liquidity") or 0
             price = pool.get("current_price") or 0
             volume = pool.get("trade_volume_24h") or 0
-            tvl = f"${float(liquidity):,.2f}"
-            price_str = f"${float(price):,.2f}"
-            volume_str = f"${float(volume):,.2f}"
             msg += (
                 f"\n🔹 Pool: {name}\n"
-                f"💰 TVL: {tvl}\n"
-                f"💱 Price: {price_str}\n"
-                f"📈 Volume (24h): {volume_str}\n"
+                f"💰 TVL: ${float(liquidity):,.2f}\n"
+                f"💱 Price: ${float(price):,.2f}\n"
+                f"📈 Volume (24h): ${float(volume):,.2f}\n"
             )
         return msg
     except Exception as e:
-        return f"❌ Error fetching data: {e}"
+        return f"❌ Error fetching pool data: {e}"
 
-# 🔘 Buttons
+# 🔘 Button layout
 def create_buttons():
-    keyboard = [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔍 Explore More Pools", callback_data='more')],
         [InlineKeyboardButton("🔎 Search for Pool", callback_data='search')],
         [InlineKeyboardButton("📍 Your Current Position", callback_data='position')],
         [InlineKeyboardButton("💵 Live Price of Your Token", callback_data='liveprice')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
 
 # ✅ /start handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    message = "Hey Shivani 👋\n\n" + fetch_pools(limit=3)
-    await update.message.reply_text(text=message, reply_markup=create_buttons())
+    msg = "Hey Shivani 👋\n\n" + fetch_pools(limit=3)
+    await update.message.reply_text(text=msg, reply_markup=create_buttons())
 
-# 🔘 Button click handler
+# 🔘 Handle button interactions
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
-    current_text = query.message.text
 
-    if data == "more":
-        context.user_data.clear()
-        new_text = fetch_pools(limit=10)
+    try:
+        if data == "more":
+            context.user_data.clear()
+            new_text = fetch_pools(limit=10)
 
-    elif data == "search":
-        context.user_data["awaiting_search"] = True
-        new_text = "🔍 Please type the pool name you want to search."
+        elif data == "search":
+            context.user_data["awaiting_search"] = True
+            new_text = "🔍 Please type the pool name you want to search."
 
-    elif data == "position":
-        try:
+        elif data == "position":
             response = requests.get("https://gremory-simulationserver.onrender.com/position")
-            position_data = response.json()
-            if position_data.get("error"):
-                new_text = f"❌ Error: {position_data['error']}"
+            data = response.json()
+            if data.get("error"):
+                new_text = f"❌ Error: {data['error']}"
             else:
                 new_text = (
                     f"📍 Current Position:\n\n"
-                    f"🔹 ID: {position_data.get('position_id', 'N/A')}\n"
-                    f"💰 Funds: ${position_data.get('funds_deployed', 0):,.2f}\n"
-                    f"💱 Price: ${position_data.get('current_price', 0):,.2f}\n"
-                    f"🔲 Range: ${position_data.get('current_range', [0,0])[0]:,.2f} - ${position_data.get('current_range', [0,0])[1]:,.2f}\n"
-                    f"💸 Fees: ${position_data.get('fees_earned', 0):,.2f}\n"
-                    f"📊 Last Seen: ${position_data.get('last_price_seen', 0):,.2f}\n"
-                    f"🔄 Rebalances: {position_data.get('total_rebalances', 0)}"
+                    f"🔹 ID: {data.get('position_id', 'N/A')}\n"
+                    f"💰 Funds: ${data.get('funds_deployed', 0):,.2f}\n"
+                    f"💱 Price: ${data.get('current_price', 0):,.2f}\n"
+                    f"🔲 Range: ${data.get('current_range', [0,0])[0]:,.2f} - ${data.get('current_range', [0,0])[1]:,.2f}\n"
+                    f"💸 Fees: ${data.get('fees_earned', 0):,.2f}\n"
+                    f"📊 Last Seen: ${data.get('last_price_seen', 0):,.2f}\n"
+                    f"🔄 Rebalances: {data.get('total_rebalances', 0)}"
                 )
-        except Exception as e:
-            new_text = f"❌ Error: {e}"
 
-    elif data == "liveprice":
-        try:
+        elif data == "liveprice":
             response = requests.get("https://gremory-simulationserver.onrender.com/price")
-            price_data = response.json()
-            if price_data.get("error"):
-                new_text = f"❌ Error: {price_data['error']}"
+            data = response.json()
+            if data.get("error"):
+                new_text = f"❌ Error: {data['error']}"
             else:
-                new_text = f"💵 Token Price: ${price_data.get('price', 0):,.2f}"
-        except Exception as e:
-            new_text = f"❌ Error: {e}"
+                new_text = f"💵 Token Price: ${data.get('price', 0):,.2f}"
 
-    else:
-        new_text = "⚠️ Unknown option."
+        else:
+            new_text = "⚠️ Unknown option."
 
-    if current_text != new_text:
         await query.edit_message_text(text=new_text, reply_markup=create_buttons())
 
-# 🔍 Search Handler
+    except Exception as e:
+        await query.edit_message_text(text=f"❌ Error: {e}", reply_markup=create_buttons())
+
+# 🔎 Handle search input after button press
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_search"):
         await update.message.reply_text("ℹ️ Use /start to begin.", reply_markup=create_buttons())
         return
 
-    query = update.message.text.strip().lower()
+    search_query = update.message.text.strip().lower()
     context.user_data["awaiting_search"] = False
 
     try:
         response = requests.get("https://dlmm-api.meteora.ag/pair/all_with_pagination?limit=100")
         data = response.json()
         pairs = data.get("pairs", [])
+
         for pool in pairs:
             name = pool.get("name", "").lower()
-            if query in name:
+            if search_query in name:
                 liquidity = pool.get("liquidity") or 0
                 price = pool.get("current_price") or 0
                 volume = pool.get("trade_volume_24h") or 0
                 msg = (
-                    f"🔍 Result for '{query}':\n\n"
+                    f"🔍 Result for '{search_query}':\n\n"
                     f"🔹 Pool: {pool.get('name')}\n"
                     f"💰 TVL: ${float(liquidity):,.2f}\n"
                     f"💱 Price: ${float(price):,.2f}\n"
@@ -341,14 +334,14 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error: {e}", reply_markup=create_buttons())
 
-# 🌐 Flask Webhook Route
+# 🌐 Flask route for Telegram webhook
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
     application.update_queue.put_nowait(update)
     return "ok"
 
-# 🚀 Main App Runner
+# 🚀 Main async function to start bot
 async def main():
     global application
     application = (
@@ -362,14 +355,12 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
-    # Set webhook once
+    # Set webhook only once
     await bot.set_webhook(WEBHOOK_URL)
-    print("✅ Webhook set!")
+    print("✅ Webhook set successfully!")
 
-    # Flask handles webhook updates; don't call application.run_polling()
-
-import asyncio
+# 🏁 Entry point
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-
