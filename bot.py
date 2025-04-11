@@ -1,5 +1,6 @@
 import os
 import requests
+import asyncio
 from flask import Flask, request
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,11 +16,13 @@ from telegram.ext import (
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-render-url.onrender.com/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-app-name.onrender.com/webhook
 
+# Flask app
 app = Flask(__name__)
-application = Application.builder().token(BOT_TOKEN).build()
 
+# Telegram bot application
+application = Application.builder().token(BOT_TOKEN).build()
 
 # 🔁 Fetch pool data
 def fetch_pools(limit=3):
@@ -163,7 +166,7 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def webhook():
     if request.method == "POST":
         update = Update.de_json(request.get_json(force=True), application.bot)
-        application.update_queue.put(update)
+        asyncio.run(application.process_update(update))  # ✅ important fix
         return "ok"
 
 
@@ -173,15 +176,18 @@ def index():
     return "🚀 Bot is running via webhook."
 
 
-# 🔧 Setup handlers and webhook
+# 🔧 Setup handlers and start webhook
 async def setup():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
+
+    await application.initialize()
+    await application.start()  # ✅ start application
     await application.bot.set_webhook(url=WEBHOOK_URL)
 
 
+# Run the Flask app with bot setup
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(setup())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
