@@ -166,8 +166,10 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    loop = asyncio.get_event_loop()
+    loop.create_task(application.process_update(update))
     return jsonify(success=True)
+
 
 # 🟢 Health check route
 @app.route('/', methods=['GET'])
