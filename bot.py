@@ -191,56 +191,83 @@
 import os
 import logging
 import asyncio
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
+    ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 )
 
-# --- Logging Setup ---
+# Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# --- Flask App ---
+# Environment variables
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Example: https://your-domain.com/webhook
+
+# Create Flask app
 app = Flask(__name__)
 
-# --- Telegram Bot Setup ---
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Ensure this is set in your environment
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # e.g., https://yourdomain.com/webhook
+# Build Application instance (only once)
+application = ApplicationBuilder().token(TOKEN).build()
 
-application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# --- Bot Handlers ---
+# Define basic command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Hello! I'm alive 😎")
+    await update.message.reply_text("Hello! I'm your bot 👋")
+
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send /start to see me in action!")
+    await update.message.reply_text("Send /start to start me, or just say hi!")
 
+
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(update.message.text)
+
+
+# Add handlers to application
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("help", help_command))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-# --- Webhook Route ---
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
-    return jsonify(success=True)
 
-# --- Main Entry Point ---
+# Flask root route (for status check)
+@app.route("/", methods=["GET"])
+def index():
+    return "🚀 Bot is alive!", 200
+
+
+# Webhook route
+@app.route("/webhook", methods=["POST"])
+async def webhook():
+    """Process incoming webhook updates"""
+    try:
+        update = Update.de_json(request.get_json(force=True), application.bot)
+        await application.process_update(update)
+    except Exception as e:
+        logger.error(f"Error processing update: {e}")
+        return "Error", 500
+    return "OK", 200
+
+
+# Startup hook to initialize the application and set the webhook
+async def setup_webhook():
+    logger.info("Deleting old webhook (if any)...")
+    await application.bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Setting new webhook...")
+    await application.bot.set_webhook(WEBHOOK_URL + "/webhook")
+    logger.info(f"Webhook set to {WEBHOOK_URL}/webhook")
+
+
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
+    # Start setup before running Flask
+    asyncio.run(setup_webhook())
 
-    # Initialize and start the bot
-    loop.run_until_complete(application.initialize())
-    loop.run_until_complete(application.start())
-    loop.run_until_complete(application.bot.set_webhook(url=WEBHOOK_URL))
+    # Run Flask app
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
 
-    print("✅ Bot initialized and webhook set!")
 
     # Start Flask server
     port = int(os.environ.get("PORT", 10000))
