@@ -11,16 +11,15 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-import asyncio
 
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 bot = Bot(TOKEN)
-application = None  # ✅ Define globally here
 
 app = Flask(__name__)
+application = None  # Declare globally so it's accessible in webhook route
 
 # 🔁 Fetch pool data
 def fetch_pools(limit=3):
@@ -153,15 +152,18 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error: {e}", reply_markup=create_buttons())
 
+# ✅ Root route for Render health check
+@app.route("/", methods=["GET"])
+def index():
+    return "✅ Telegram bot webhook server is running!", 200
+
 # 🌐 Flask Webhook Route
 @app.route("/webhook", methods=["POST"])
 def webhook():
     global application
-    if application:
-        update = Update.de_json(request.get_json(force=True), bot)
-        application.update_queue.put_nowait(update)
-        return "ok"
-    return "⚠️ Bot not ready yet.", 503
+    update = Update.de_json(request.get_json(force=True), bot)
+    application.update_queue.put_nowait(update)
+    return "ok"
 
 # 🚀 Main App Runner
 async def main():
@@ -177,12 +179,10 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
-    # Set webhook once
     await bot.set_webhook(WEBHOOK_URL)
     print("✅ Webhook set!")
 
-    # No polling because Flask handles updates
-
+import asyncio
 if __name__ == "__main__":
     asyncio.run(main())
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
