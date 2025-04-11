@@ -16,7 +16,11 @@ from telegram.ext import (
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # e.g., https://your-app-name.onrender.com/webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+# Validate environment variables
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise Exception("❌ BOT_TOKEN or WEBHOOK_URL is missing from environment variables.")
 
 # Flask app
 app = Flask(__name__)
@@ -156,15 +160,15 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error while searching: {e}", reply_markup=create_buttons())
 
-# 🧠 Webhook endpoint (updated)
+# 🧠 Webhook endpoint
 @app.route('/webhook', methods=['POST'])
 def webhook():
     if request.method == "POST":
         update = Update.de_json(request.get_json(force=True), application.bot)
-        asyncio.create_task(application.process_update(update))
-        return jsonify(success=True)  # ✅ Return JSON response
+        asyncio.run(application.process_update(update))
+        return jsonify(success=True)
 
-# 🟢 Flask index route
+# 🟢 Flask root route
 @app.route('/', methods=['GET'])
 def index():
     return "🚀 Bot is running via webhook."
