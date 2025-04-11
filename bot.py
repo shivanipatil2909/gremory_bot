@@ -1,25 +1,33 @@
 import os
 import requests
+import asyncio
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-from flask import Flask, request
-from telegram import Bot, Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    CallbackQueryHandler,
     MessageHandler,
     filters,
 )
+from flask_cors import CORS
 
+# Load environment variables
 load_dotenv()
-
-TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-bot = Bot(TOKEN)
 
+if not BOT_TOKEN or not WEBHOOK_URL:
+    raise Exception("❌ BOT_TOKEN or WEBHOOK_URL is missing from environment variables.")
+
+# Initialize Flask app and CORS
 app = Flask(__name__)
-application = None  # Declare globally so it's accessible in webhook route
+CORS(app)
+
+# Create Telegram bot application
+application = Application.builder().token(BOT_TOKEN).build()
 
 # 🔁 Fetch pool data
 def fetch_pools(limit=3):
@@ -63,7 +71,7 @@ def create_buttons():
 # ✅ /start handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    message = "Hey Shivani 👋\n\n" + fetch_pools(limit=3)
+    message = fetch_pools(limit=3)
     await update.message.reply_text(text=message, reply_markup=create_buttons())
 
 # 🔘 Button click handler
@@ -86,31 +94,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = requests.get("https://gremory-simulationserver.onrender.com/position")
             position_data = response.json()
             if position_data.get("error"):
-                new_text = f"❌ Error: {position_data['error']}"
+                new_text = f"❌ Error fetching position: {position_data['error']}"
             else:
                 new_text = (
-                    f"📍 Current Position:\n\n"
-                    f"🔹 ID: {position_data.get('position_id', 'N/A')}\n"
-                    f"💰 Funds: ${position_data.get('funds_deployed', 0):,.2f}\n"
-                    f"💱 Price: ${position_data.get('current_price', 0):,.2f}\n"
-                    f"🔲 Range: ${position_data.get('current_range', [0,0])[0]:,.2f} - ${position_data.get('current_range', [0,0])[1]:,.2f}\n"
-                    f"💸 Fees: ${position_data.get('fees_earned', 0):,.2f}\n"
-                    f"📊 Last Seen: ${position_data.get('last_price_seen', 0):,.2f}\n"
-                    f"🔄 Rebalances: {position_data.get('total_rebalances', 0)}"
+                    f"📍 Your Current Position in Pools:\n\n"
+                    f"🔹 Position ID: {position_data.get('position_id', 'N/A')}\n"
+                    f"💰 Funds Deployed: ${position_data.get('funds_deployed', 0):,.2f}\n"
+                    f"💱 Current Price: ${position_data.get('current_price', 0):,.2f}\n"
+                    f"🔲 Current Range: ${position_data.get('current_range', [0,0])[0]:,.2f} - ${position_data.get('current_range', [0,0])[1]:,.2f}\n"
+                    f"💸 Fees Earned: ${position_data.get('fees_earned', 0):,.2f}\n"
+                    f"📊 Last Price Seen: ${position_data.get('last_price_seen', 0):,.2f}\n"
+                    f"🔄 Last Rebalance: {position_data.get('last_rebalance', 'N/A')}\n"
+                    f"🔁 Total Rebalances: {position_data.get('total_rebalances', 0)}"
                 )
         except Exception as e:
-            new_text = f"❌ Error: {e}"
+            new_text = f"❌ Error fetching position: {e}"
 
     elif data == "liveprice":
         try:
             response = requests.get("https://gremory-simulationserver.onrender.com/price")
             price_data = response.json()
             if price_data.get("error"):
-                new_text = f"❌ Error: {price_data['error']}"
+                new_text = f"❌ Error fetching live price: {price_data['error']}"
             else:
-                new_text = f"💵 Token Price: ${price_data.get('price', 0):,.2f}"
+                new_text = f"💵 Live Price of Your Token: ${price_data.get('price', 0):,.2f}"
         except Exception as e:
-            new_text = f"❌ Error: {e}"
+            new_text = f"❌ Error fetching live price: {e}"
 
     else:
         new_text = "⚠️ Unknown option."
@@ -121,7 +130,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 🔍 Search Handler
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_search"):
-        await update.message.reply_text("ℹ️ Use /start to begin.", reply_markup=create_buttons())
+        await update.message.reply_text("ℹ️ Please use /start to begin.", reply_markup=create_buttons())
         return
 
     query = update.message.text.strip().lower()
@@ -150,39 +159,32 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ No matching pool found.", reply_markup=create_buttons())
 
     except Exception as e:
-        await update.message.reply_text(f"⚠️ Error: {e}", reply_markup=create_buttons())
+        await update.message.reply_text(f"⚠️ Error while searching: {e}", reply_markup=create_buttons())
 
-# ✅ Root route for Render health check
-@app.route("/", methods=["GET"])
-def index():
-    return "✅ Telegram bot webhook server is running!", 200
-
-# 🌐 Flask Webhook Route
-@app.route("/webhook", methods=["POST"])
+# 🧠 Webhook endpoint (FIXED for Flask)
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    global application
-    update = Update.de_json(request.get_json(force=True), bot)
-    application.update_queue.put_nowait(update)
-    return "ok"
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    asyncio.run(application.process_update(update))
+    return jsonify(success=True)
 
-# 🚀 Main App Runner
+# 🟢 Health check route
+@app.route('/', methods=['GET'])
+def index():
+    return "🚀 Telegram bot is live!"
+
+# 🔰 Main entrypoint
 async def main():
-    global application
-    application = (
-        Application.builder()
-        .token(TOKEN)
-        .concurrent_updates(True)
-        .build()
-    )
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
 
-    await bot.set_webhook(WEBHOOK_URL)
-    print("✅ Webhook set!")
+    await application.initialize()
+    await application.start()
+    await application.bot.set_webhook(url=WEBHOOK_URL)
 
-import asyncio
 if __name__ == "__main__":
-    asyncio.run(main())
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
