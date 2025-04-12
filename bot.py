@@ -180,17 +180,17 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 app = Flask(__name__)
 
-# Initialize the Telegram bot application
+# Initialize Telegram application
 application = Application.builder().token(BOT_TOKEN).build()
 
-# Start command handler
+# --- Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("Top 3 Pools", callback_data='top_pools')],
@@ -202,12 +202,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("Hello! Choose an option:", reply_markup=reply_markup)
 
-# Callback handler for buttons
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Dummy responses for each button
     responses = {
         "top_pools": "🔝 Top 3 Pools:\n1. Pool A\n2. Pool B\n3. Pool C",
         "search_pool": "🔍 Searched Pool Result: Dummy Pool",
@@ -216,31 +214,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "current_price": "💲 Current Price: $123.45",
     }
 
-    response = responses.get(query.data, "Unknown option.")
-    await query.edit_message_text(text=response)
+    await query.edit_message_text(text=responses.get(query.data, "Unknown option."))
 
-# Register handlers
+# Register Telegram bot handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# Initialize bot before first request
-@app.before_first_request
-def setup():
-    asyncio.run(application.initialize())
-    asyncio.run(application.bot.set_webhook(url=WEBHOOK_URL))
+# --- Flask Routes ---
+@app.route('/')
+def index():
+    return "Bot is running!"
 
-# Webhook route
 @app.route('/webhook', methods=['POST'])
-def telegram_webhook():
+def webhook():
+    # Lazy initialize if needed
+    if not application.running:
+        asyncio.run(application.initialize())
+        asyncio.run(application.bot.set_webhook(url=WEBHOOK_URL))
+    
     update = Update.de_json(request.get_json(force=True), application.bot)
     asyncio.run(application.process_update(update))
     return jsonify(success=True)
 
-# Optional test route
-@app.route('/', methods=['GET'])
-def home():
-    return "Your Flask bot is running!"
-
+# --- Main Entry Point ---
 if __name__ == '__main__':
+    # Local testing - you can skip webhook setup here, since it's handled in /webhook route
     app.run(port=10000)
+
 
