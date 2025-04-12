@@ -253,13 +253,18 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
 
 # Set the webhook with Telegram API
-def set_webhook():
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={WEBHOOK_URL}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        print("Webhook successfully set!")
-    else:
-        print(f"Failed to set webhook: {response.text}")
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+
+    async def process():
+        if not application.initialized:
+            await application.initialize()
+        await application.process_update(update)
+
+    asyncio.run(process())
+    return jsonify(success=True)
+
 
 # ---- Start Flask Server ----
 if __name__ == '__main__':
