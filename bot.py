@@ -268,7 +268,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         except Exception as e:
             new_text = f"❌ Error fetching position: {e}"
-
     elif data == "liveprice":
         try:
             response = requests.get("https://gremory-simulationserver.onrender.com/price")
@@ -279,7 +278,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_text = f"💵 Live Price of Your Token: ${price_data.get('price', 0):,.2f}"
         except Exception as e:
             new_text = f"❌ Error fetching live price: {e}"
-
     else:
         new_text = "⚠️ Unknown option."
 
@@ -297,16 +295,18 @@ def index():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    # Lazy initialize if needed
-    if not application.running:
-        asyncio.run(application.initialize())
-        asyncio.run(application.bot.set_webhook(url=WEBHOOK_URL))
-    
     update = Update.de_json(request.get_json(force=True), application.bot)
     asyncio.run(application.process_update(update))
     return jsonify(success=True)
 
+# --- Set Webhook at Startup ---
+async def set_webhook():
+    await application.initialize()
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+
 # --- Main Entry Point ---
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(set_webhook())
     app.run(host='0.0.0.0', port=port)
