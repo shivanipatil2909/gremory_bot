@@ -13,6 +13,7 @@ from telegram.ext import (
     filters,
 )
 from flask_cors import CORS
+import threading
 
 # Load environment variables
 load_dotenv()
@@ -22,14 +23,14 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 if not BOT_TOKEN or not WEBHOOK_URL:
     raise Exception("❌ BOT_TOKEN or WEBHOOK_URL is missing from environment variables.")
 
-# Initialize Flask app and CORS
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
 # Create Telegram application
 application = Application.builder().token(BOT_TOKEN).build()
 
-# ------- Your Helper Functions Below --------
+# -------- Your Helper Functions --------
 
 def fetch_pools(limit=3):
     url = f"https://dlmm-api.meteora.ag/pair/all_with_pagination?limit={limit}"
@@ -68,7 +69,7 @@ def create_buttons():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ------- Telegram Handlers --------
+# -------- Telegram Handlers --------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -159,7 +160,7 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error while searching: {e}", reply_markup=create_buttons())
 
-# ------- Flask Webhook Route --------
+# -------- Flask Routes --------
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -171,19 +172,23 @@ def webhook():
 def index():
     return "🚀 Telegram bot is live on Render!"
 
-# ------- Setup Handlers and Webhook --------
-@app.before_first_request
-def setup_bot():
-    async def setup():
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CallbackQueryHandler(button_handler))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
-        await application.initialize()
-        await application.start()
-        await application.bot.set_webhook(url=WEBHOOK_URL)
-    asyncio.create_task(setup())
+# -------- Start the Telegram Bot in Background --------
 
-# ------- Run App --------
-if __name__ == "__main__":
+async def start_bot():
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
+    await application.initialize()
+    await application.start()
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+
+def run_async_loop():
+    asyncio.run(start_bot())
+
+# -------- Start Flask App --------
+
+if __name__ == '__main__':
+    # Start the bot in background
+    threading.Thread(target=run_async_loop).start()
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host='0.0.0.0', port=port)
