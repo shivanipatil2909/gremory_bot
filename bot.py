@@ -173,103 +173,74 @@
 # if __name__ == '__main__':
 #     print("Starting Flask app with Telegram bot 🚀")
 #     app.run(host='0.0.0.0', port=10000)
-import asyncio
 import os
-from dotenv import load_dotenv
+import asyncio
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
-    ContextTypes, filters
-)
-import requests
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
-# ---- Flask Setup ----
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
 app = Flask(__name__)
-CORS(app)
 
-# ---- Bot Setup ----
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Get bot token from environment variables
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Get webhook URL from environment variables
-
-# Initialize Telegram bot with token
+# Initialize the Telegram bot application
 application = Application.builder().token(BOT_TOKEN).build()
 
-# ---- Utility Functions ----
-def create_buttons():
-    keyboard = [
-        [InlineKeyboardButton("🌊 Top 3 Pools", callback_data='top3')],
-        [InlineKeyboardButton("🔍 Search Pool", callback_data='search')],
-        [InlineKeyboardButton("🔎 Explore More Pools", callback_data='more')],
-        [InlineKeyboardButton("📍 Live Position of Pool", callback_data='liveposition')],
-        [InlineKeyboardButton("💵 Current Price", callback_data='currentprice')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-# ---- Telegram Handlers ----
+# Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    message = "Hello! Welcome to the bot. Select an option below:"
-    await update.message.reply_text(text=message, reply_markup=create_buttons())
+    keyboard = [
+        [InlineKeyboardButton("Top 3 Pools", callback_data='top_pools')],
+        [InlineKeyboardButton("Search Pool", callback_data='search_pool')],
+        [InlineKeyboardButton("Explore More Pools", callback_data='explore_more')],
+        [InlineKeyboardButton("Live Position", callback_data='live_position')],
+        [InlineKeyboardButton("Current Price", callback_data='current_price')],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Hello! Choose an option:", reply_markup=reply_markup)
 
+# Callback handler for buttons
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
 
-    # Handle button clicks and respond with dummy data
-    if data == "top3":
-        new_text = "🌊 Top 3 Pools:\n\n1. Pool A\n2. Pool B\n3. Pool C"
-    elif data == "search":
-        new_text = "🔍 Please type the pool name you want to search."
-    elif data == "more":
-        new_text = "🔎 Exploring more pools: Pool D, Pool E, Pool F"
-    elif data == "liveposition":
-        new_text = "📍 Live Position: Pool A, $1000 Deployed, $10,000 Volume"
-    elif data == "currentprice":
-        new_text = "💵 Current Price: $100"
-    else:
-        new_text = "⚠️ Unknown option."
+    # Dummy responses for each button
+    responses = {
+        "top_pools": "🔝 Top 3 Pools:\n1. Pool A\n2. Pool B\n3. Pool C",
+        "search_pool": "🔍 Searched Pool Result: Dummy Pool",
+        "explore_more": "🧭 Exploring More Pools... (Dummy Data)",
+        "live_position": "📊 Live Position of Pool: 42%",
+        "current_price": "💲 Current Price: $123.45",
+    }
 
-    await query.edit_message_text(text=new_text, reply_markup=create_buttons())
+    response = responses.get(query.data, "Unknown option.")
+    await query.edit_message_text(text=response)
 
-# ---- Flask Webhook Routes ----
+# Register handlers
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CallbackQueryHandler(button_handler))
+
+# Initialize bot before first request
+@app.before_first_request
+def setup():
+    asyncio.run(application.initialize())
+    asyncio.run(application.bot.set_webhook(url=WEBHOOK_URL))
+
+# Webhook route
 @app.route('/webhook', methods=['POST'])
-def webhook():
+def telegram_webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
     asyncio.run(application.process_update(update))
     return jsonify(success=True)
 
+# Optional test route
 @app.route('/', methods=['GET'])
-def index():
-    return "🚀 Telegram bot is live!"
+def home():
+    return "Your Flask bot is running!"
 
-# ---- Register Telegram Handlers ----
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CallbackQueryHandler(button_handler))
-
-# Set the webhook with Telegram API
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-
-    async def process():
-        if not application.initialized:
-            await application.initialize()
-        await application.process_update(update)
-
-    asyncio.run(process())
-    return jsonify(success=True)
-
-
-# ---- Start Flask Server ----
 if __name__ == '__main__':
-    # Set the webhook when starting the server
-    set_webhook()
+    app.run(port=10000)
 
-    print("Starting Flask app with Telegram bot 🚀")
-    app.run(host='0.0.0.0', port=10000)
