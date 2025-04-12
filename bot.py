@@ -176,6 +176,7 @@
 import os
 import logging
 import requests
+import asyncio
 from flask import Flask, request, jsonify
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
@@ -238,16 +239,26 @@ def create_buttons():
 # Store user states
 user_states = {}
 
+# Helper function to run async functions
+def run_async(coroutine):
+    """Run an async function in a new event loop and return the result"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
+
 # --- Command Handlers ---
 def handle_start(update):
     chat_id = update.message.chat_id
     user_states.pop(chat_id, None)  # Clear user state if any
     message = fetch_pools(limit=3)
-    bot.send_message(
+    run_async(bot.send_message(
         chat_id=chat_id,
         text=message,
         reply_markup=create_buttons()
-    )
+    ))
 
 def handle_message(update):
     chat_id = update.message.chat_id
@@ -259,17 +270,17 @@ def handle_message(update):
         user_states[chat_id] = None  # Clear the search state
         
         # Simple mock search response - implement actual search here
-        bot.send_message(
+        run_async(bot.send_message(
             chat_id=chat_id,
             text=f"🔍 Searching for pool with term: {search_term}\n\nThis functionality is not fully implemented yet.",
             reply_markup=create_buttons()
-        )
+        ))
     else:
         # Default response for non-command messages
-        bot.send_message(
+        run_async(bot.send_message(
             chat_id=chat_id,
             text="I don't understand that command. Try /start to begin.",
-        )
+        ))
 
 def handle_callback_query(update):
     query = update.callback_query
@@ -278,7 +289,7 @@ def handle_callback_query(update):
     data = query.data
     
     # Answer callback query to stop loading indicator
-    bot.answer_callback_query(callback_query_id=query.id)
+    run_async(bot.answer_callback_query(callback_query_id=query.id))
     
     if data == "more":
         user_states.pop(chat_id, None)  # Clear user state
@@ -322,12 +333,12 @@ def handle_callback_query(update):
         new_text = "⚠️ Unknown option."
     
     # Edit message text
-    bot.edit_message_text(
+    run_async(bot.edit_message_text(
         chat_id=chat_id,
         message_id=message_id,
         text=new_text,
         reply_markup=create_buttons()
-    )
+    ))
 
 # --- Flask Routes ---
 @app.route('/')
@@ -359,19 +370,25 @@ def webhook():
     threading.Thread(target=process_update, args=(update_json,)).start()
     return jsonify(success=True)
 
-# Set up webhook
+# Set up webhook (fix for handling coroutines)
 def setup_webhook():
     try:
-        webhook_info = bot.get_webhook_info()
-        current_url = webhook_info.url
+        # Create a separate loop to run the async setup
+        async def async_setup():
+            # Get current webhook info
+            webhook_info = await bot.get_webhook_info()
+            current_url = webhook_info.url
+            
+            # Only set webhook if it's not already set to the right URL
+            if current_url != WEBHOOK_URL:
+                await bot.delete_webhook()
+                await bot.set_webhook(url=WEBHOOK_URL)
+                logger.info(f"Webhook set to {WEBHOOK_URL}")
+            else:
+                logger.info(f"Webhook already set to {WEBHOOK_URL}")
         
-        # Only set webhook if it's not already set to the right URL
-        if current_url != WEBHOOK_URL:
-            bot.delete_webhook()
-            bot.set_webhook(url=WEBHOOK_URL)
-            logger.info(f"Webhook set to {WEBHOOK_URL}")
-        else:
-            logger.info(f"Webhook already set to {WEBHOOK_URL}")
+        # Run the async setup in a new event loop
+        run_async(async_setup())
     except Exception as e:
         logger.error(f"Error setting up webhook: {e}")
         raise
