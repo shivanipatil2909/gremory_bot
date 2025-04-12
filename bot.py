@@ -175,10 +175,9 @@
 #     app.run(host='0.0.0.0', port=10000)
 import os
 import logging
+import json
 import requests
-import asyncio
 from flask import Flask, request, jsonify
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 import threading
 
@@ -192,9 +191,81 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 app = Flask(__name__)
-bot = Bot(token=BOT_TOKEN)
+
+# Store user states - simple in-memory storage
+user_states = {}
+
+# --- Direct Telegram API Functions ---
+def send_message(chat_id, text, reply_markup=None):
+    """Send message using direct API call instead of Bot object"""
+    url = f"{API_URL}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    
+    if reply_markup:
+        payload['reply_markup'] = json.dumps(reply_markup)
+        
+    try:
+        response = requests.post(url, json=payload)
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error sending message: {e}")
+        return None
+
+def answer_callback_query(callback_query_id):
+    """Answer callback query using direct API call"""
+    url = f"{API_URL}/answerCallbackQuery"
+    payload = {'callback_query_id': callback_query_id}
+    
+    try:
+        response = requests.post(url, json=payload)
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error answering callback: {e}")
+        return None
+
+def edit_message_text(chat_id, message_id, text, reply_markup=None):
+    """Edit message using direct API call"""
+    url = f"{API_URL}/editMessageText"
+    payload = {
+        'chat_id': chat_id,
+        'message_id': message_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    
+    if reply_markup:
+        payload['reply_markup'] = json.dumps(reply_markup)
+        
+    try:
+        response = requests.post(url, json=payload)
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error editing message: {e}")
+        return None
+
+def set_webhook(webhook_url):
+    """Set webhook using direct API call"""
+    url = f"{API_URL}/setWebhook"
+    payload = {'url': webhook_url}
+    
+    try:
+        response = requests.post(url, json=payload)
+        result = response.json()
+        if result.get('ok'):
+            logger.info(f"Webhook set to {webhook_url}")
+        else:
+            logger.error(f"Failed to set webhook: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error setting webhook: {e}")
+        return None
 
 # --- Fetch Pools Function ---
 def fetch_pools(limit=3):
@@ -228,74 +299,59 @@ def fetch_pools(limit=3):
 
 # --- Telegram Button Creation ---
 def create_buttons():
-    keyboard = [
-        [InlineKeyboardButton("🔍 Explore More Pools", callback_data='more')],
-        [InlineKeyboardButton("🔎 Search for Pool", callback_data='search')],
-        [InlineKeyboardButton("📍 Your Current Position", callback_data='position')],
-        [InlineKeyboardButton("💵 Live Price of Your Token", callback_data='liveprice')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-# Store user states
-user_states = {}
-
-# Helper function to run async functions
-def run_async(coroutine):
-    """Run an async function in a new event loop and return the result"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(coroutine)
-    finally:
-        loop.close()
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "🔍 Explore More Pools", "callback_data": "more"}],
+            [{"text": "🔎 Search for Pool", "callback_data": "search"}],
+            [{"text": "📍 Your Current Position", "callback_data": "position"}],
+            [{"text": "💵 Live Price of Your Token", "callback_data": "liveprice"}]
+        ]
+    }
+    return keyboard
 
 # --- Command Handlers ---
-def handle_start(update):
-    chat_id = update.message.chat_id
-    user_states.pop(chat_id, None)  # Clear user state if any
-    message = fetch_pools(limit=3)
-    run_async(bot.send_message(
-        chat_id=chat_id,
-        text=message,
-        reply_markup=create_buttons()
-    ))
-
-def handle_message(update):
-    chat_id = update.message.chat_id
-    message_text = update.message.text
+def handle_start(chat_id):
+    # Clear user state if any
+    user_states.pop(str(chat_id), None)
     
+    # Send welcome message with pools
+    message = fetch_pools(limit=3)
+    send_message(chat_id, message, create_buttons())
+
+def handle_message(chat_id, text):
     # Check if user is in search mode
-    if user_states.get(chat_id) == "awaiting_search":
-        search_term = message_text.strip()
-        user_states[chat_id] = None  # Clear the search state
+    if user_states.get(str(chat_id)) == "awaiting_search":
+        search_term = text.strip()
+        user_states[str(chat_id)] = None  # Clear the search state
         
         # Simple mock search response - implement actual search here
-        run_async(bot.send_message(
-            chat_id=chat_id,
-            text=f"🔍 Searching for pool with term: {search_term}\n\nThis functionality is not fully implemented yet.",
-            reply_markup=create_buttons()
-        ))
+        send_message(
+            chat_id,
+            f"🔍 Searching for pool with term: {search_term}\n\nThis functionality is not fully implemented yet.",
+            create_buttons()
+        )
     else:
         # Default response for non-command messages
-        run_async(bot.send_message(
-            chat_id=chat_id,
-            text="I don't understand that command. Try /start to begin.",
-        ))
+        send_message(
+            chat_id,
+            "I don't understand that command. Try /start to begin."
+        )
 
-def handle_callback_query(update):
-    query = update.callback_query
-    chat_id = query.message.chat_id
-    message_id = query.message.message_id
-    data = query.data
+def handle_callback(callback_query):
+    query_id = callback_query.get("id")
+    data = callback_query.get("data")
+    message = callback_query.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
+    message_id = message.get("message_id")
     
     # Answer callback query to stop loading indicator
-    run_async(bot.answer_callback_query(callback_query_id=query.id))
+    answer_callback_query(query_id)
     
     if data == "more":
-        user_states.pop(chat_id, None)  # Clear user state
+        user_states.pop(str(chat_id), None)  # Clear user state
         new_text = fetch_pools(limit=10)
     elif data == "search":
-        user_states[chat_id] = "awaiting_search"
+        user_states[str(chat_id)] = "awaiting_search"
         new_text = "🔍 Please type the pool name you want to search."
     elif data == "position":
         try:
@@ -333,12 +389,7 @@ def handle_callback_query(update):
         new_text = "⚠️ Unknown option."
     
     # Edit message text
-    run_async(bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=message_id,
-        text=new_text,
-        reply_markup=create_buttons()
-    ))
+    edit_message_text(chat_id, message_id, new_text, create_buttons())
 
 # --- Flask Routes ---
 @app.route('/')
@@ -348,55 +399,35 @@ def index():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle webhook updates from Telegram"""
-    update_json = request.get_json()
+    update = request.get_json()
     
     # Process update in a separate thread to avoid blocking
     def process_update(update_data):
         try:
-            update = Update.de_json(update_data, bot)
-            
             # Handle different types of updates
-            if update.message and update.message.text:
-                if update.message.text.startswith('/start'):
-                    handle_start(update)
+            if "message" in update_data:
+                message = update_data["message"]
+                chat_id = message.get("chat", {}).get("id")
+                text = message.get("text", "")
+                
+                if text.startswith('/start'):
+                    handle_start(chat_id)
                 else:
-                    handle_message(update)
-            elif update.callback_query:
-                handle_callback_query(update)
+                    handle_message(chat_id, text)
+            elif "callback_query" in update_data:
+                callback_query = update_data["callback_query"]
+                handle_callback(callback_query)
         except Exception as e:
             logger.error(f"Error processing update: {e}")
     
     # Start processing in a new thread
-    threading.Thread(target=process_update, args=(update_json,)).start()
+    threading.Thread(target=process_update, args=(update,)).start()
     return jsonify(success=True)
-
-# Set up webhook (fix for handling coroutines)
-def setup_webhook():
-    try:
-        # Create a separate loop to run the async setup
-        async def async_setup():
-            # Get current webhook info
-            webhook_info = await bot.get_webhook_info()
-            current_url = webhook_info.url
-            
-            # Only set webhook if it's not already set to the right URL
-            if current_url != WEBHOOK_URL:
-                await bot.delete_webhook()
-                await bot.set_webhook(url=WEBHOOK_URL)
-                logger.info(f"Webhook set to {WEBHOOK_URL}")
-            else:
-                logger.info(f"Webhook already set to {WEBHOOK_URL}")
-        
-        # Run the async setup in a new event loop
-        run_async(async_setup())
-    except Exception as e:
-        logger.error(f"Error setting up webhook: {e}")
-        raise
 
 # --- Main Entry Point ---
 if __name__ == '__main__':
     # Set up the webhook
-    setup_webhook()
+    set_webhook(WEBHOOK_URL)
     
     # Run the Flask app
     port = int(os.environ.get("PORT", 10000))
