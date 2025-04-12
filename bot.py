@@ -26,10 +26,11 @@ if not BOT_TOKEN or not WEBHOOK_URL:
 app = Flask(__name__)
 CORS(app)
 
-# Create Telegram bot application
+# Create Telegram application
 application = Application.builder().token(BOT_TOKEN).build()
 
-# 🔁 Fetch pool data
+# ------- Your Helper Functions Below --------
+
 def fetch_pools(limit=3):
     url = f"https://dlmm-api.meteora.ag/pair/all_with_pagination?limit={limit}"
     try:
@@ -58,7 +59,6 @@ def fetch_pools(limit=3):
     except Exception as e:
         return f"❌ Error fetching data: {e}"
 
-# 🔘 Buttons
 def create_buttons():
     keyboard = [
         [InlineKeyboardButton("🔍 Explore More Pools", callback_data='more')],
@@ -68,13 +68,13 @@ def create_buttons():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-# ✅ /start handler
+# ------- Telegram Handlers --------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     message = fetch_pools(limit=3)
     await update.message.reply_text(text=message, reply_markup=create_buttons())
 
-# 🔘 Button click handler
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -120,14 +120,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_text = f"💵 Live Price of Your Token: ${price_data.get('price', 0):,.2f}"
         except Exception as e:
             new_text = f"❌ Error fetching live price: {e}"
-
     else:
         new_text = "⚠️ Unknown option."
 
     if current_text != new_text:
         await query.edit_message_text(text=new_text, reply_markup=create_buttons())
 
-# 🔍 Search Handler
 async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_search"):
         await update.message.reply_text("ℹ️ Please use /start to begin.", reply_markup=create_buttons())
@@ -161,30 +159,31 @@ async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"⚠️ Error while searching: {e}", reply_markup=create_buttons())
 
-# 🧠 Webhook endpoint (FIXED for Flask)
+# ------- Flask Webhook Route --------
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    asyncio.create_task(application.process_update(update))
     return jsonify(success=True)
 
-# 🟢 Health check route
 @app.route('/', methods=['GET'])
 def index():
-    return "🚀 Telegram bot is live!"
+    return "🚀 Telegram bot is live on Render!"
 
-# 🔰 Main entrypoint
-async def main():
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
+# ------- Setup Handlers and Webhook --------
+@app.before_first_request
+def setup_bot():
+    async def setup():
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CallbackQueryHandler(button_handler))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_handler))
+        await application.initialize()
+        await application.start()
+        await application.bot.set_webhook(url=WEBHOOK_URL)
+    asyncio.create_task(setup())
 
-    await application.initialize()
-    await application.start()
-    await application.bot.set_webhook(url=WEBHOOK_URL)
-
+# ------- Run App --------
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
