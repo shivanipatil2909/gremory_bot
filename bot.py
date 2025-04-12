@@ -175,10 +175,11 @@
 #     app.run(host='0.0.0.0', port=10000)
 import os
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import requests
 from flask import Flask, request, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -190,6 +191,7 @@ app = Flask(__name__)
 
 # Initialize Telegram application
 application = Application.builder().token(BOT_TOKEN).build()
+executor = ThreadPoolExecutor(max_workers=5)
 
 # --- Fetch Pools Function ---
 def fetch_pools(limit=3):
@@ -232,7 +234,8 @@ def create_buttons():
 
 # --- Telegram Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
+    if hasattr(context, 'user_data'):
+        context.user_data.clear()
     message = fetch_pools(limit=3)
     await update.message.reply_text(text=message, reply_markup=create_buttons())
 
@@ -243,10 +246,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_text = query.message.text
 
     if data == "more":
-        context.user_data.clear()
+        if hasattr(context, 'user_data'):
+            context.user_data.clear()
         new_text = fetch_pools(limit=10)
     elif data == "search":
-        context.user_data["awaiting_search"] = True
+        if hasattr(context, 'user_data'):
+            context.user_data["awaiting_search"] = True
         new_text = "🔍 Please type the pool name you want to search."
     elif data == "position":
         try:
@@ -284,9 +289,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_text != new_text:
         await query.edit_message_text(text=new_text, reply_markup=create_buttons())
 
+async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if hasattr(context, 'user_data') and context.user_data.get("awaiting_search"):
+        search_term = update.message.text.strip()
+        # Clear the awaiting search flag
+        context.user_data["awaiting_search"] = False
+        
+        # Here you would add the actual search logic
+        # For now, just confirm the search
+        await update.message.reply_text(
+            f"🔍 Searching for pool with term: {search_term}\n\n"
+            f"This functionality is not fully implemented yet.",
+            reply_markup=create_buttons()
+        )
+
 # Register Telegram bot handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CallbackQueryHandler(button_handler))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search))
 
 # --- Flask Routes ---
 @app.route('/')
@@ -295,18 +315,41 @@ def index():
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    asyncio.run(application.process_update(update))
+    """Handle webhook updates from Telegram using a thread pool for asyncio operations"""
+    json_data = request.get_json(force=True)
+    
+    def process_update():
+        update = Update.de_json(json_data, application.bot)
+        # Create a new event loop for this thread
+        asyncio.set_event_loop(asyncio.new_event_loop())
+        loop = asyncio.get_event_loop()
+        # Run the update processing in this thread's event loop
+        loop.run_until_complete(application.process_update(update))
+    
+    # Submit the update processing to the thread pool
+    executor.submit(process_update)
     return jsonify(success=True)
 
-# --- Set Webhook at Startup ---
-async def set_webhook():
-    await application.initialize()
-    await application.bot.set_webhook(url=WEBHOOK_URL)
+# Set up webhook (must be run once at startup)
+def setup_webhook():
+    # Create a new event loop for this function
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    async def _setup():
+        await application.initialize()
+        await application.bot.set_webhook(url=WEBHOOK_URL)
+        print(f"Webhook set to {WEBHOOK_URL}")
+    
+    # Run the setup in this function's event loop
+    loop.run_until_complete(_setup())
+    loop.close()
 
 # --- Main Entry Point ---
 if __name__ == '__main__':
+    # Set up the webhook in a separate function
+    setup_webhook()
+    
+    # Run the Flask app
     port = int(os.environ.get("PORT", 5000))
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(set_webhook())
     app.run(host='0.0.0.0', port=port)
