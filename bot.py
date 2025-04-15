@@ -495,6 +495,6 @@ if __name__ == "__main__":
     else:
         logger.warning("WEBHOOK_URL not set in environment variables")
         
-    port = int(os.getenv("PORT", 10000))
+    port = int(os.getenv("PORT", 5000))
     logger.info(f"Starting Flask server on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
