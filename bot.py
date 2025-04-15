@@ -422,13 +422,20 @@ def index():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     update = request.get_json()
+    logger.info(f"Received update: {update}")
 
-    def process(update):
+    try:
         if "message" in update:
             chat_id = update["message"]["chat"]["id"]
             text = update["message"].get("text", "")
+            
             if text.startswith("/start"):
                 handle_start(chat_id)
+            elif chat_id in user_states and user_states.get(chat_id) == "awaiting_search":
+                query = text.strip()
+                msg = search_pool(query)
+                send_message(chat_id, msg)
+                user_states[chat_id] = "logged_in"  # Reset state after search
             else:
                 send_message(chat_id, "Unknown command. Try /start")
 
@@ -436,6 +443,7 @@ def webhook():
             cb = update["callback_query"]
             data = cb.get("data")
             chat_id = cb["message"]["chat"]["id"]
+            message_id = cb["message"]["message_id"]
             answer_callback_query(cb["id"])
 
             if data == "login" or data == "register":
@@ -464,17 +472,29 @@ def webhook():
                 user_states[chat_id] = "awaiting_search"
                 send_message(chat_id, "🔍 Type the name/symbol of the pool you want to search:")
 
-        elif "message" in update and user_states.get(chat_id) == "awaiting_search":
-            query = update["message"].get("text", "").strip()
-            msg = search_pool(query)
-            send_message(chat_id, msg)
+    except Exception as e:
+        logger.error(f"Error processing update: {e}")
 
-    threading.Thread(target=process, args=(update,)).start()
     return jsonify({"status": "ok"})
+
+# Set the webhook when the application starts
+@app.before_first_request
+def setup_webhook():
+    if WEBHOOK_URL:
+        set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+    else:
+        logger.warning("WEBHOOK_URL not set in environment variables")
 
 # Run the application
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)
-
-
-
+    # Set webhook manually before starting the server
+    if WEBHOOK_URL:
+        set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+    else:
+        logger.warning("WEBHOOK_URL not set in environment variables")
+        
+    port = int(os.getenv("PORT", 5000))
+    logger.info(f"Starting Flask server on port {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
