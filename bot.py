@@ -328,7 +328,10 @@ def set_webhook(webhook_url):
     payload = {'url': webhook_url}
     try:
         response = requests.post(url, json=payload).json()
-        logger.info("Webhook set" if response.get('ok') else f"Failed: {response}")
+        if response.get('ok'):
+            logger.info("Webhook set")
+        else:
+            logger.error(f"Failed to set webhook: {response}")
         return response
     except Exception as e:
         logger.error(f"Error setting webhook: {e}")
@@ -434,7 +437,7 @@ def webhook():
         if "message" in update:
             chat_id = update["message"]["chat"]["id"]
             text = update["message"].get("text", "")
-            
+
             if text.startswith("/start"):
                 handle_start(chat_id)
             elif chat_id in user_states and user_states.get(chat_id) == "awaiting_search":
@@ -492,6 +495,6 @@ if __name__ == "__main__":
     else:
         logger.warning("WEBHOOK_URL not set in environment variables")
         
-    port = int(os.getenv("PORT", 5000))
+    port = int(os.getenv("PORT", 10000))
     logger.info(f"Starting Flask server on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
