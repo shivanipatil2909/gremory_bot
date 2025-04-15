@@ -264,7 +264,6 @@ import json
 import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-import threading
 
 # Configure logging
 logging.basicConfig(
@@ -417,7 +416,14 @@ def search_pool(query):
 # --- Flask Routes ---
 @app.route('/')
 def index():
-    return "Bot is running!"
+    # Set webhook when the root endpoint is accessed
+    if WEBHOOK_URL:
+        set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+        return f"Bot is running! Webhook set to {WEBHOOK_URL}"
+    else:
+        logger.warning("WEBHOOK_URL not set in environment variables")
+        return "Bot is running! Warning: WEBHOOK_URL not set."
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -476,15 +482,6 @@ def webhook():
         logger.error(f"Error processing update: {e}")
 
     return jsonify({"status": "ok"})
-
-# Set the webhook when the application starts
-@app.before_first_request
-def setup_webhook():
-    if WEBHOOK_URL:
-        set_webhook(WEBHOOK_URL)
-        logger.info(f"Webhook set to {WEBHOOK_URL}")
-    else:
-        logger.warning("WEBHOOK_URL not set in environment variables")
 
 # Run the application
 if __name__ == "__main__":
