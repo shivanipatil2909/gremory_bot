@@ -277,7 +277,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-url.com/webhook")
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
 # Ensure webhook URL has https:// prefix
 if not WEBHOOK_URL.startswith("https://"):
@@ -344,51 +343,6 @@ def edit_message_text(chat_id, message_id, text, reply_markup=None):
     except Exception as e:
         logger.error(f"Error editing message: {e}")
         return None
-
-def delete_webhook():
-    """Delete webhook using direct API call"""
-    url = f"{API_URL}/deleteWebhook"
-    try:
-        response = requests.get(url)
-        logger.info(f"Delete webhook response: {response.text}")
-        return response.json()
-    except Exception as e:
-        logger.error(f"Error deleting webhook: {e}")
-        return None
-
-def get_webhook_info():
-    """Get webhook info using direct API call"""
-    url = f"{API_URL}/getWebhookInfo"
-    try:
-        response = requests.get(url)
-        logger.info(f"Webhook info: {response.text}")
-        return response.json()
-    except Exception as e:
-        logger.error(f"Error getting webhook info: {e}")
-        return None
-
-def set_webhook(webhook_url):
-    """Set webhook using direct API call"""
-    url = f"{API_URL}/setWebhook"
-    payload = {'url': webhook_url}
-    
-    try:
-        response = requests.post(url, json=payload)
-        result = response.json()
-        logger.info(f"Set webhook response: {response.text}")
-        if result.get('ok'):
-            logger.info(f"✅ Webhook successfully set to {webhook_url}")
-        else:
-            logger.error(f"❌ Failed to set webhook: {result}")
-        return result
-    except Exception as e:
-        logger.error(f"Error setting webhook: {e}")
-        return None
-
-def send_test_message():
-    """Send a test message to admin when bot starts"""
-    if ADMIN_CHAT_ID:
-        send_message(ADMIN_CHAT_ID, "🔄 Bot has been restarted and is now online!")
 
 # --- Fetch Pools Function ---
 def fetch_pools(limit=3):
@@ -468,49 +422,12 @@ def create_main_buttons():
         ]
     }
 
-def create_pool_buttons():
+def create_agent_buttons():
     return {
         "inline_keyboard": [
-            [{"text": "Explore Pools", "callback_data": "explore_pools"}],
-            [{"text": "Search Pools", "callback_data": "search_pools"}],
-            [{"text": "← Back", "callback_data": "back_to_main"}]
+            [{"text": "Create Agent", "callback_data": "create_agent"}]
         ]
     }
-
-# --- Position and Price Functions ---
-def fetch_position():
-    try:
-        response = requests.get("https://gremory-simulationserver.onrender.com/position")
-        position_data = response.json()
-        if position_data.get("error"):
-            return f"❌ Error fetching position: {position_data['error']}"
-        else:
-            return (
-                f"📍 Your Current Position in Pools:\n\n"
-                f"🔹 Position ID: {position_data.get('position_id', 'N/A')}\n"
-                f"💰 Funds Deployed: ${position_data.get('funds_deployed', 0):,.2f}\n"
-                f"💱 Current Price: ${position_data.get('current_price', 0):,.2f}\n"
-                f"🔲 Current Range: ${position_data.get('current_range', [0,0])[0]:,.2f} - ${position_data.get('current_range', [0,0])[1]:,.2f}\n"
-                f"💸 Fees Earned: ${position_data.get('fees_earned', 0):,.2f}\n"
-                f"📊 Last Price Seen: ${position_data.get('last_price_seen', 0):,.2f}\n"
-                f"🔄 Last Rebalance: {position_data.get('last_rebalance', 'N/A')}\n"
-                f"🔁 Total Rebalances: {position_data.get('total_rebalances', 0)}"
-            )
-    except Exception as e:
-        logger.error(f"Error fetching position: {e}")
-        return f"❌ Error fetching position: {e}"
-
-def fetch_live_price():
-    try:
-        response = requests.get("https://gremory-simulationserver.onrender.com/price")
-        price_data = response.json()
-        if price_data.get("error"):
-            return f"❌ Error fetching live price: {price_data['error']}"
-        else:
-            return f"💵 Live Price of Your Token: ${price_data.get('price', 0):,.2f}"
-    except Exception as e:
-        logger.error(f"Error fetching live price: {e}")
-        return f"❌ Error fetching live price: {e}"
 
 # --- Command Handlers ---
 def handle_start(chat_id):
@@ -522,14 +439,20 @@ def handle_start(chat_id):
 
 def handle_message(chat_id, text):
     """Handle regular text messages"""
-    # Check if user is in search mode
     if user_states.get(str(chat_id)) == "awaiting_search":
         search_term = text.strip()
         msg = search_pool(search_term)
-        send_message(chat_id, msg, create_pool_buttons())
+        send_message(chat_id, msg, create_main_buttons())
         user_states[str(chat_id)] = "logged_in"  # Reset state after search
+    elif user_states.get(str(chat_id)) == "creating_agent":
+        liquidity_pool = text.strip()
+        user_states[str(chat_id)] = "awaiting_amount"
+        send_message(chat_id, f"💸 You selected the pool: {liquidity_pool}. Now, please enter the amount to allocate.")
+    elif user_states.get(str(chat_id)) == "awaiting_amount":
+        amount = text.strip()
+        send_message(chat_id, f"✅ You created an agent with amount: {amount} for the pool.", create_main_buttons())
+        user_states[str(chat_id)] = "logged_in"  # Reset state after agent creation
     else:
-        # Default response for non-command messages
         send_message(
             chat_id,
             "I don't understand that command. Try /start to begin."
@@ -549,27 +472,19 @@ def handle_callback(callback_query):
         user_states[str(chat_id)] = "logged_in"
         edit_message_text(chat_id, message_id, "✅ You're logged in!", create_main_buttons())
     elif data == "agents":
-        send_message(chat_id, "👤 Available agents:\n1. Agent Smith\n2. Agent Carter\n3. Agent Natasha")
+        user_states[str(chat_id)] = "awaiting_agent_action"
+        send_message(chat_id, "🔹 Choose an action below:", create_agent_buttons())
+    elif data == "create_agent":
+        user_states[str(chat_id)] = "creating_agent"
+        send_message(chat_id, "🔨 Please enter the liquidity pool name where you want to create an agent:")
     elif data == "balance":
         send_message(chat_id, "💼 Your balance: $500.00")
     elif data == "view_search_lp":
-        edit_message_text(chat_id, message_id, "📊 Choose an option below:", create_pool_buttons())
-    elif data == "explore_pools":
-        msg = fetch_pools()
-        send_message(chat_id, msg, create_pool_buttons())
-    elif data == "search_pools":
-        send_message(chat_id, "🔍 Please enter the token name you want to search:")
-        user_states[str(chat_id)] = "awaiting_search"
-    elif data == "back_to_main":
-        edit_message_text(chat_id, message_id, "✅ You're back on the main menu.", create_main_buttons())
+        send_message(chat_id, "📊 Choose an option below:", create_main_buttons())
     else:
         send_message(chat_id, "❓ Unknown action.")
 
 # --- Flask Routes ---
-@app.route("/")
-def index():
-    return "🤖 Telegram Bot is Running!"
-
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = request.get_json()
@@ -586,16 +501,12 @@ def webhook():
             handle_message(chat_id, text)
 
     elif "callback_query" in update:
-        handle_callback(update["callback_query"])
+        callback_query = update["callback_query"]
+        handle_callback(callback_query)
 
     return jsonify({"status": "ok"})
 
-# --- Run Server and Set Webhook ---
 if __name__ == "__main__":
-    # Set webhook once on server start
-    threading.Thread(target=set_webhook, args=(WEBHOOK_URL,)).start()
+    logger.info("Starting Flask app with webhook route.")
+    app.run(debug=True, host="0.0.0.0", port=5000)
 
-    # Optionally notify admin
-    threading.Thread(target=send_test_message).start()
-
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
