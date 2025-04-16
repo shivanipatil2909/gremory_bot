@@ -264,8 +264,9 @@ import json
 import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
+import threading
 
-# Configure more verbose logging
+# Configure logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.DEBUG
 )
@@ -274,8 +275,9 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://gremory-bot.onrender.com/webhook")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app-url.com/webhook")
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
 # Ensure webhook URL has https:// prefix
 if not WEBHOOK_URL.startswith("https://"):
@@ -290,14 +292,17 @@ user_states = {}
 
 # --- Direct Telegram API Functions ---
 def send_message(chat_id, text, reply_markup=None):
+    """Send message using direct API call"""
     url = f"{API_URL}/sendMessage"
     payload = {
         'chat_id': chat_id,
         'text': text,
         'parse_mode': 'HTML'
     }
+    
     if reply_markup:
         payload['reply_markup'] = json.dumps(reply_markup)
+        
     try:
         response = requests.post(url, json=payload)
         logger.info(f"Send message response: {response.text}")
@@ -306,7 +311,42 @@ def send_message(chat_id, text, reply_markup=None):
         logger.error(f"Error sending message: {e}")
         return None
 
+def answer_callback_query(callback_query_id):
+    """Answer callback query using direct API call"""
+    url = f"{API_URL}/answerCallbackQuery"
+    payload = {'callback_query_id': callback_query_id}
+    
+    try:
+        response = requests.post(url, json=payload)
+        logger.info(f"Answer callback response: {response.text}")
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error answering callback: {e}")
+        return None
+
+def edit_message_text(chat_id, message_id, text, reply_markup=None):
+    """Edit message using direct API call"""
+    url = f"{API_URL}/editMessageText"
+    payload = {
+        'chat_id': chat_id,
+        'message_id': message_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
+    
+    if reply_markup:
+        payload['reply_markup'] = json.dumps(reply_markup)
+        
+    try:
+        response = requests.post(url, json=payload)
+        logger.info(f"Edit message response: {response.text}")
+        return response.json()
+    except Exception as e:
+        logger.error(f"Error editing message: {e}")
+        return None
+
 def delete_webhook():
+    """Delete webhook using direct API call"""
     url = f"{API_URL}/deleteWebhook"
     try:
         response = requests.get(url)
@@ -317,6 +357,7 @@ def delete_webhook():
         return None
 
 def get_webhook_info():
+    """Get webhook info using direct API call"""
     url = f"{API_URL}/getWebhookInfo"
     try:
         response = requests.get(url)
@@ -326,46 +367,11 @@ def get_webhook_info():
         logger.error(f"Error getting webhook info: {e}")
         return None
 
-def send_test_message():
-    # Send a message to yourself (if you know your chat_id)
-    # Replace with your actual chat_id
-    # You can get your chat_id by talking to @userinfobot on Telegram
-    admin_chat_id = os.getenv("ADMIN_CHAT_ID")
-    if admin_chat_id:
-        send_message(admin_chat_id, "🔄 Bot has been restarted and is now online!")
-
-def answer_callback_query(callback_query_id):
-    url = f"{API_URL}/answerCallbackQuery"
-    payload = {'callback_query_id': callback_query_id}
-    try:
-        response = requests.post(url, json=payload)
-        logger.info(f"Answer callback response: {response.text}")
-        return response.json()
-    except Exception as e:
-        logger.error(f"Error answering callback: {e}")
-        return None
-
-def edit_message_text(chat_id, message_id, text, reply_markup=None):
-    url = f"{API_URL}/editMessageText"
-    payload = {
-        'chat_id': chat_id,
-        'message_id': message_id,
-        'text': text,
-        'parse_mode': 'HTML'
-    }
-    if reply_markup:
-        payload['reply_markup'] = json.dumps(reply_markup)
-    try:
-        response = requests.post(url, json=payload)
-        logger.info(f"Edit message response: {response.text}")
-        return response.json()
-    except Exception as e:
-        logger.error(f"Error editing message: {e}")
-        return None
-
 def set_webhook(webhook_url):
+    """Set webhook using direct API call"""
     url = f"{API_URL}/setWebhook"
     payload = {'url': webhook_url}
+    
     try:
         response = requests.post(url, json=payload)
         result = response.json()
@@ -379,26 +385,10 @@ def set_webhook(webhook_url):
         logger.error(f"Error setting webhook: {e}")
         return None
 
-# --- Telegram Button Creation ---
-def create_buttons():
-    return {
-        "inline_keyboard": [
-            [{"text": "Show Agents", "callback_data": "agents"}],
-            [{"text": "Balance", "callback_data": "balance"}],
-            [{"text": "View/Search Liquidity Pools", "callback_data": "view_search_lp"}]
-        ]
-    }
-
-def handle_start(chat_id):
-    logger.info(f"Handling /start command for chat_id: {chat_id}")
-    user_states[chat_id] = "awaiting_login"
-    result = send_message(chat_id, "👋 Welcome! Please choose an option:", {
-        "inline_keyboard": [
-            [{"text": "Login", "callback_data": "login"}],
-            [{"text": "Create Account", "callback_data": "register"}]
-        ]
-    })
-    logger.info(f"Result of sending welcome message: {result}")
+def send_test_message():
+    """Send a test message to admin when bot starts"""
+    if ADMIN_CHAT_ID:
+        send_message(ADMIN_CHAT_ID, "🔄 Bot has been restarted and is now online!")
 
 # --- Fetch Pools Function ---
 def fetch_pools(limit=3):
@@ -460,189 +450,152 @@ def search_pool(query):
         logger.error(f"Error searching for pools: {e}")
         return f"❌ Error fetching data: {e}"
 
-# --- Flask Routes ---
-@app.route('/')
-def index():
-    # First, delete any existing webhooks
-    delete_webhook()
-    
-    # Then set the new webhook
-    webhook_result = set_webhook(WEBHOOK_URL)
-    
-    # Get webhook info to verify
-    info_result = get_webhook_info()
-    
-    # Send a test message if admin chat ID is set
-    send_test_message()
-    
-    return f"""
-    <h1>Telegram Bot Status</h1>
-    <p>Bot is running!</p>
-    <p>Webhook set to: {WEBHOOK_URL}</p>
-    <p>Webhook info: {json.dumps(info_result)}</p>
-    """
+# --- Telegram Button Creation ---
+def create_welcome_buttons():
+    return {
+        "inline_keyboard": [
+            [{"text": "Login", "callback_data": "login"}],
+            [{"text": "Create Account", "callback_data": "register"}]
+        ]
+    }
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
+def create_main_buttons():
+    return {
+        "inline_keyboard": [
+            [{"text": "Show Agents", "callback_data": "agents"}],
+            [{"text": "Balance", "callback_data": "balance"}],
+            [{"text": "View/Search Liquidity Pools", "callback_data": "view_search_lp"}]
+        ]
+    }
+
+def create_pool_buttons():
+    return {
+        "inline_keyboard": [
+            [{"text": "Explore Pools", "callback_data": "explore_pools"}],
+            [{"text": "Search Pools", "callback_data": "search_pools"}],
+            [{"text": "← Back", "callback_data": "back_to_main"}]
+        ]
+    }
+
+# --- Position and Price Functions ---
+def fetch_position():
     try:
-        # Log all request information
-        logger.info(f"Request headers: {dict(request.headers)}")
-        logger.info(f"Request data: {request.data}")
-        
-        update = request.get_json()
-        logger.info(f"Parsed update: {update}")
-        
-        if update is None:
-            logger.error("No JSON data received in webhook")
-            return jsonify({"status": "error", "message": "No JSON data received"}), 400
-
-        if "message" in update:
-            chat_id = update["message"]["chat"]["id"]
-            logger.info(f"Message from chat_id: {chat_id}")
-            
-            if "text" in update["message"]:
-                text = update["message"]["text"]
-                logger.info(f"Message text: {text}")
-                
-                if text.startswith("/start"):
-                    handle_start(chat_id)
-                elif chat_id in user_states and user_states.get(chat_id) == "awaiting_search":
-                    query = text.strip()
-                    msg = search_pool(query)
-                    send_message(chat_id, msg)
-                    user_states[chat_id] = "logged_in"  # Reset state after search
-                else:
-                    send_message(chat_id, "Unknown command. Try /start")
-            else:
-                logger.warning(f"Message without text: {update}")
-                send_message(chat_id, "I can only process text messages. Please send a text command.")
-
-        elif "callback_query" in update:
-            logger.info(f"Callback query received: {update['callback_query']}")
-            cb = update["callback_query"]
-            data = cb.get("data")
-            chat_id = cb["message"]["chat"]["id"]
-            message_id = cb["message"]["message_id"]
-            answer_callback_query(cb["id"])
-
-            if data == "login" or data == "register":
-                user_states[chat_id] = "logged_in"
-                send_message(chat_id, "✅ You're now logged in.", create_buttons())
-
-            elif data == "agents":
-                send_message(chat_id, "🤖 List of Active Agents (mock)")
-
-            elif data == "balance":
-                send_message(chat_id, "📊 Agent Earnings: \nAgent 1: +5.4%\nAgent 2: +3.1%")
-
-            elif data == "view_search_lp":
-                send_message(chat_id, "🌐 View or Search for Liquidity Pools", {
-                    "inline_keyboard": [
-                        [{"text": "Explore Pools", "callback_data": "explore_pools"}],
-                        [{"text": "Search Pools", "callback_data": "search_pools"}]
-                    ]
-                })
-
-            elif data == "explore_pools":
-                msg = fetch_pools()
-                send_message(chat_id, msg)
-
-            elif data == "search_pools":
-                user_states[chat_id] = "awaiting_search"
-                send_message(chat_id, "🔍 Type the name/symbol of the pool you want to search:")
+        response = requests.get("https://gremory-simulationserver.onrender.com/position")
+        position_data = response.json()
+        if position_data.get("error"):
+            return f"❌ Error fetching position: {position_data['error']}"
         else:
-            logger.warning(f"Update with no message or callback_query: {update}")
-
+            return (
+                f"📍 Your Current Position in Pools:\n\n"
+                f"🔹 Position ID: {position_data.get('position_id', 'N/A')}\n"
+                f"💰 Funds Deployed: ${position_data.get('funds_deployed', 0):,.2f}\n"
+                f"💱 Current Price: ${position_data.get('current_price', 0):,.2f}\n"
+                f"🔲 Current Range: ${position_data.get('current_range', [0,0])[0]:,.2f} - ${position_data.get('current_range', [0,0])[1]:,.2f}\n"
+                f"💸 Fees Earned: ${position_data.get('fees_earned', 0):,.2f}\n"
+                f"📊 Last Price Seen: ${position_data.get('last_price_seen', 0):,.2f}\n"
+                f"🔄 Last Rebalance: {position_data.get('last_rebalance', 'N/A')}\n"
+                f"🔁 Total Rebalances: {position_data.get('total_rebalances', 0)}"
+            )
     except Exception as e:
-        logger.error(f"Error processing update: {e}", exc_info=True)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"Error fetching position: {e}")
+        return f"❌ Error fetching position: {e}"
+
+def fetch_live_price():
+    try:
+        response = requests.get("https://gremory-simulationserver.onrender.com/price")
+        price_data = response.json()
+        if price_data.get("error"):
+            return f"❌ Error fetching live price: {price_data['error']}"
+        else:
+            return f"💵 Live Price of Your Token: ${price_data.get('price', 0):,.2f}"
+    except Exception as e:
+        logger.error(f"Error fetching live price: {e}")
+        return f"❌ Error fetching live price: {e}"
+
+# --- Command Handlers ---
+def handle_start(chat_id):
+    """Handle /start command"""
+    logger.info(f"Handling /start command for chat_id: {chat_id}")
+    user_states[str(chat_id)] = "awaiting_login"
+    result = send_message(chat_id, "👋 Welcome! Please choose an option:", create_welcome_buttons())
+    logger.info(f"Result of sending welcome message: {result}")
+
+def handle_message(chat_id, text):
+    """Handle regular text messages"""
+    # Check if user is in search mode
+    if user_states.get(str(chat_id)) == "awaiting_search":
+        search_term = text.strip()
+        msg = search_pool(search_term)
+        send_message(chat_id, msg, create_pool_buttons())
+        user_states[str(chat_id)] = "logged_in"  # Reset state after search
+    else:
+        # Default response for non-command messages
+        send_message(
+            chat_id,
+            "I don't understand that command. Try /start to begin."
+        )
+
+def handle_callback(callback_query):
+    query_id = callback_query.get("id")
+    data = callback_query.get("data")
+    message = callback_query.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
+    message_id = message.get("message_id")
+
+    logger.info(f"Handling callback: {data} from chat_id: {chat_id}")
+    answer_callback_query(query_id)
+
+    if data == "login" or data == "register":
+        user_states[str(chat_id)] = "logged_in"
+        edit_message_text(chat_id, message_id, "✅ You're logged in!", create_main_buttons())
+    elif data == "agents":
+        send_message(chat_id, "👤 Available agents:\n1. Agent Smith\n2. Agent Carter\n3. Agent Natasha")
+    elif data == "balance":
+        send_message(chat_id, "💼 Your balance: $500.00")
+    elif data == "view_search_lp":
+        edit_message_text(chat_id, message_id, "📊 Choose an option below:", create_pool_buttons())
+    elif data == "explore_pools":
+        msg = fetch_pools()
+        send_message(chat_id, msg, create_pool_buttons())
+    elif data == "search_pools":
+        send_message(chat_id, "🔍 Please enter the token name you want to search:")
+        user_states[str(chat_id)] = "awaiting_search"
+    elif data == "back_to_main":
+        edit_message_text(chat_id, message_id, "✅ You're back on the main menu.", create_main_buttons())
+    else:
+        send_message(chat_id, "❓ Unknown action.")
+
+# --- Flask Routes ---
+@app.route("/")
+def index():
+    return "🤖 Telegram Bot is Running!"
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    update = request.get_json()
+    logger.info(f"Received update: {json.dumps(update, indent=2)}")
+
+    if "message" in update:
+        message = update["message"]
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "")
+
+        if text.startswith("/start"):
+            handle_start(chat_id)
+        else:
+            handle_message(chat_id, text)
+
+    elif "callback_query" in update:
+        handle_callback(update["callback_query"])
 
     return jsonify({"status": "ok"})
 
-# Additional debug route
-@app.route('/debug', methods=['GET'])
-def debug():
-    # Get webhook info
-    webhook_info = get_webhook_info()
-    
-    # Try to send a test message
-    admin_chat_id = os.getenv("ADMIN_CHAT_ID")
-    test_message_result = None
-    if admin_chat_id:
-        test_message_result = send_message(admin_chat_id, "Debug message from bot")
-    
-    debug_info = {
-        "webhook_info": webhook_info,
-        "environment": {
-            "BOT_TOKEN": BOT_TOKEN[:5] + "..." if BOT_TOKEN else None,
-            "WEBHOOK_URL": WEBHOOK_URL,
-            "PORT": os.getenv("PORT", "10000"),
-            "ADMIN_CHAT_ID": admin_chat_id
-        },
-        "test_message_result": test_message_result,
-        "user_states": user_states
-    }
-    
-    return jsonify(debug_info)
-
-# Manual test endpoint
-@app.route('/test_webhook', methods=['GET'])
-def test_webhook():
-    # Simulate a message update
-    test_update = {
-        "update_id": 123456789,
-        "message": {
-            "message_id": 123,
-            "from": {
-                "id": 12345678,
-                "first_name": "Test",
-                "username": "test_user"
-            },
-            "chat": {
-                "id": 12345678,
-                "first_name": "Test",
-                "username": "test_user",
-                "type": "private"
-            },
-            "date": 1618924582,
-            "text": "/start"
-        }
-    }
-    
-    # Process the simulated update
-    admin_chat_id = os.getenv("ADMIN_CHAT_ID")
-    if admin_chat_id:
-        # Override the chat_id to send to admin
-        test_update["message"]["chat"]["id"] = int(admin_chat_id)
-        test_update["message"]["from"]["id"] = int(admin_chat_id)
-        
-        # Log the test update
-        logger.info(f"Processing test update: {test_update}")
-        
-        # Process as if it was received via webhook
-        if "message" in test_update:
-            chat_id = test_update["message"]["chat"]["id"]
-            text = test_update["message"].get("text", "")
-            
-            if text.startswith("/start"):
-                handle_start(chat_id)
-            else:
-                send_message(chat_id, "Test message received!")
-                
-        return jsonify({"status": "ok", "message": "Test update processed"})
-    else:
-        return jsonify({"status": "error", "message": "ADMIN_CHAT_ID not set"})
-
-# Run the application
+# --- Run Server and Set Webhook ---
 if __name__ == "__main__":
-    # Delete and reset webhook before starting
-    delete_webhook()
-    set_webhook(WEBHOOK_URL)
-    get_webhook_info()
-    
-    # Send a startup message
-    send_test_message()
-    
-    port = int(os.getenv("PORT", 10000))
-    logger.info(f"Starting Flask server on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    # Set webhook once on server start
+    threading.Thread(target=set_webhook, args=(WEBHOOK_URL,)).start()
+
+    # Optionally notify admin
+    threading.Thread(target=send_test_message).start()
+
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
